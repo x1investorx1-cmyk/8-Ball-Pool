@@ -638,8 +638,10 @@ const CBP={x:W-38, y:H/2, r:26};
 let balls,cue,angle,shooting,botTurn,gameOver,gameAnimFrame;
 let physicsRunning=false,botAiming=false;
 let isBreakShot=false;
-let typesAssigned=false, p1Type=null, p2Type=null; /* assigned after first pocket post-break */
-let currentShooterIsBot=false, shotContactedOwn=false;
+let typesAssigned=false, p1Type=null, p2Type=null;
+let currentShooterIsBot=false, shotContactedOwn=false, railContactedThisShot=false;
+let ballInHandKitchen=false; /* cue must be placed behind baulk line */
+let placingCue=false;        /* player is dragging cue ball into position */
 let pocketedThisTurn=[], enterHeld=false, enterRampId=null, currentPower=5;
 let enterChargeStart=0, hitX=0, hitY=0;
 let p1Name='Player', p2Name='Bot';
@@ -695,10 +697,10 @@ function startGame(){
 function initGame(){
   cancelAnimationFrame(gameAnimFrame);clearInterval(clockInterval);
   physicsRunning=false;shooting=false;botTurn=false;gameOver=false;
-  botAiming=false;currentShooterIsBot=false;shotContactedOwn=false;
+  botAiming=false;currentShooterIsBot=false;shotContactedOwn=false;railContactedThisShot=false;
+  ballInHandKitchen=false;placingCue=false;
   pocketedThisTurn=[];enterHeld=false;clearInterval(enterRampId);
   hitX=0;hitY=0;chalkUses=0;isBreakShot=true;
-  /* Types not assigned until first ball pocketed after break */
   typesAssigned=false; p1Type=null; p2Type=null;
   balls=rackPositions().map(b=>({...b,vx:0,vy:0,r:BALL_R,pocketed:false,rot:0}));
   cue={x:W*.25,y:H/2,vx:0,vy:0,r:CUE_R,type:'cue',color:'#f5f5f5',pocketed:false};
@@ -812,11 +814,23 @@ function render(){
   GX.strokeStyle='rgba(255,255,255,0.14)';GX.lineWidth=1;
   GX.beginPath();GX.moveTo(ix,iy);GX.lineTo(ix+iw,iy);GX.stroke();
   GX.beginPath();GX.moveTo(ix,iy);GX.lineTo(ix,iy+ih);GX.stroke();
-  /* baulk */
+  /* baulk / kitchen */
+  const kx=kitchenX();
+  if(placingCue&&!botTurn){
+    GX.fillStyle='rgba(255,220,60,0.08)';
+    GX.fillRect(ix+BV,iy+BV,kx-ix-BV,ih-BV*2);
+    GX.strokeStyle='rgba(255,220,60,0.5)';GX.lineWidth=1.5;GX.setLineDash([6,4]);
+    GX.strokeRect(ix+BV+1,iy+BV+1,kx-ix-BV-2,ih-BV*2-2);
+    GX.setLineDash([]);
+    GX.fillStyle='rgba(255,220,60,0.75)';GX.font='bold 11px DM Sans,sans-serif';
+    GX.textAlign='center';GX.textBaseline='middle';
+    GX.fillText('PLACE CUE BALL — click to confirm',(ix+BV+kx)/2,H/2);
+    GX.textAlign='left';GX.textBaseline='alphabetic';
+  }
   GX.strokeStyle='rgba(255,255,255,0.12)';GX.lineWidth=1;GX.setLineDash([8,7]);
-  GX.beginPath();GX.moveTo(W*.28,iy+BV);GX.lineTo(W*.28,iy+ih-BV);GX.stroke();
+  GX.beginPath();GX.moveTo(kx,iy+BV);GX.lineTo(kx,iy+ih-BV);GX.stroke();
   GX.setLineDash([]);
-  GX.beginPath();GX.arc(W*.28,H/2,46,Math.PI*1.5,Math.PI*.5);
+  GX.beginPath();GX.arc(kx,H/2,46,Math.PI*1.5,Math.PI*.5);
   GX.strokeStyle='rgba(255,255,255,0.1)';GX.lineWidth=1;GX.stroke();
   /* pockets */
   for(const p of pockets)drawPocket(p);
@@ -1145,7 +1159,7 @@ function rRect(c,x,y,w,h,r){
    PHYSICS
    ===================================================== */
 function shootBall(power,isBot){
-  if(shooting||physicsRunning)return;
+  if(shooting||physicsRunning||placingCue)return;
   currentShooterIsBot=!!isBot;
   clearInterval(clockInterval);
   const spd=power*3.4;
@@ -1153,7 +1167,7 @@ function shootBall(power,isBot){
   const sa=angle+ss;
   cue.vx=Math.cos(sa)*spd-Math.sin(angle)*vs*spd*.1;
   cue.vy=Math.sin(sa)*spd+Math.cos(angle)*vs*spd*.1;
-  shooting=true;chalkUses++;shotContactedOwn=false;pocketedThisTurn=[];
+  shooting=true;chalkUses++;shotContactedOwn=false;railContactedThisShot=false;pocketedThisTurn=[];
   document.getElementById('shbtn').disabled=true;
   runPhysics();
 }
@@ -1177,10 +1191,10 @@ function runPhysics(){
       b.vx*=Math.pow(FRIC,.25);b.vy*=Math.pow(FRIC,.25);
       const nearPkt=pockets.some(p=>{const dx=b.x-p.x,dy=b.y-p.y;return dx*dx+dy*dy<(POCK_R+BALL_R+2)*(POCK_R+BALL_R+2);});
       if(!nearPkt){
-        if(b.x-b.r<CUSHION){b.x=CUSHION+b.r;b.vx=Math.abs(b.vx)*.82;}
-        if(b.x+b.r>W-CUSHION){b.x=W-CUSHION-b.r;b.vx=-Math.abs(b.vx)*.82;}
-        if(b.y-b.r<CUSHION){b.y=CUSHION+b.r;b.vy=Math.abs(b.vy)*.82;}
-        if(b.y+b.r>H-CUSHION){b.y=H-CUSHION-b.r;b.vy=-Math.abs(b.vy)*.82;}
+        if(b.x-b.r<CUSHION){b.x=CUSHION+b.r;b.vx=Math.abs(b.vx)*.82;if(b.type!=='cue')railContactedThisShot=true;}
+        if(b.x+b.r>W-CUSHION){b.x=W-CUSHION-b.r;b.vx=-Math.abs(b.vx)*.82;if(b.type!=='cue')railContactedThisShot=true;}
+        if(b.y-b.r<CUSHION){b.y=CUSHION+b.r;b.vy=Math.abs(b.vy)*.82;if(b.type!=='cue')railContactedThisShot=true;}
+        if(b.y+b.r>H-CUSHION){b.y=H-CUSHION-b.r;b.vy=-Math.abs(b.vy)*.82;if(b.type!=='cue')railContactedThisShot=true;}
       }
     }
     for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++)collideBalls(active[i],active[j]);
@@ -1214,20 +1228,33 @@ function checkPockets(active){
       if(dx*dx+dy*dy<POCK_R*POCK_R){
         b.pocketed=true;b.vx=0;b.vy=0;
         if(b.type==='cue'){
-          setTimeout(()=>{cue.pocketed=false;cue.x=W*.23;cue.y=Math.max(CUSHION+CUE_R+4,Math.min(H-CUSHION-CUE_R-4,H/2+(Math.random()-.5)*55));cue.vx=0;cue.vy=0;},720);
+          /* Scratch — place in kitchen on opponent's turn */
+          ballInHandKitchen=true;
+          setTimeout(()=>{
+            cue.pocketed=false;
+            /* Default position in kitchen center */
+            cue.x=kitchenX()-60;
+            cue.y=H/2;
+            cue.vx=0;cue.vy=0;
+            /* If player's turn coming up, let them drag it */
+          },720);
         } else if(b.type==='eight'){
           gameOver=true;
           const myT=currentShooterIsBot?p2Type:p1Type;
           const myBallsLeft=myT?balls.filter(x=>x.type===myT&&!x.pocketed).length:1;
+          /* Scratch on the 8-ball = automatic loss regardless of clearing */
+          const scratchedOn8=cue.pocketed || active.some(a=>a.type==='cue'&&a.pocketed);
           let wt,ws;
           if(!currentShooterIsBot){
-            if(myBallsLeft===0){wt=p1Name+' Wins! 🎱';ws='Perfect finish — all solids cleared!';}
-            else{wt='Bot Wins!';ws=p1Name+' sank the 8 too early!';}
+            if(scratchedOn8){wt='Bot Wins!';ws=p1Name+' scratched on the 8-ball!';}
+            else if(myBallsLeft===0){wt=p1Name+' Wins! 🎱';ws='All cleared — 8-ball legally sunk!';}
+            else{wt='Bot Wins!';ws=p1Name+' sank the 8-ball too early!';}
           } else {
             const botT=p2Type;
             const botLeft=botT?balls.filter(x=>x.type===botT&&!x.pocketed).length:1;
-            if(botLeft===0){wt=p2Name+' Wins!';ws='Bot clears and sinks the 8!';}
-            else{wt=p1Name+' Wins! 🎱';ws='Bot sank the 8 too early — you win!';}
+            if(scratchedOn8){wt=p1Name+' Wins! 🎱';ws='Bot scratched on the 8-ball!';}
+            else if(botLeft===0){wt=p2Name+' Wins!';ws='Bot clears the table and sinks the 8!';}
+            else{wt=p1Name+' Wins! 🎱';ws='Bot sank the 8-ball too early — you win!';}
           }
           document.getElementById('wtitle').textContent=wt;
           document.getElementById('wsub').textContent=ws;
@@ -1240,91 +1267,126 @@ function checkPockets(active){
   }
 }
 
+/* Kitchen x boundary — baulk line x position */
+function kitchenX(){ return W*.28; }
+
+function giveKitchen(toBot){
+  /* Opponent gets ball-in-hand in the kitchen */
+  ballInHandKitchen=true;
+  if(toBot){
+    /* Bot places cue anywhere in kitchen automatically */
+    setTimeout(()=>{
+      if(cue.pocketed){cue.pocketed=false;}
+      cue.x=kitchenX()-50+(Math.random()-0.5)*40;
+      cue.y=Math.max(CUSHION+CUE_R+4,Math.min(H-CUSHION-CUE_R-4,H/2+(Math.random()-0.5)*60));
+      cue.vx=0;cue.vy=0;
+      ballInHandKitchen=false;
+      doBotTurn();
+    },800);
+  } else {
+    /* Player drags cue — placingCue mode */
+    if(cue.pocketed){cue.pocketed=false;}
+    cue.x=kitchenX()-60;
+    cue.y=H/2;cue.vx=0;cue.vy=0;
+    placingCue=true;
+    botTurn=false;
+    document.getElementById('shbtn').disabled=true;
+    flashMsg('Place cue ball behind the baulk line, then shoot','#ffa');
+    updateUI();render();
+  }
+}
+
 function endTurn(){
   const pocketed=pocketedThisTurn.slice();pocketedThisTurn=[];
   const wasBot=currentShooterIsBot;
   const scratch=cue.pocketed;
+  const nonEight=pocketed.filter(b=>b.type!=='eight');
 
-  /* ---- BREAK SHOT ---- */
+  /* ===================== BREAK SHOT ===================== */
   if(isBreakShot){
     isBreakShot=false;
     if(scratch){
-      flashMsg('Scratch on the break — turn passes!');
-      setTimeout(()=>{doBotTurn();},760);
+      flashMsg('Scratch on the break! Ball-in-hand in the kitchen.');
+      giveKitchen(!wasBot); /* opponent gets kitchen */
       return;
     }
-    /* After break: if balls were pocketed, shooter keeps turn but types still unassigned
-       — they get assigned on the NEXT ball pocketed (first ball in after break) */
-    const nonEight=pocketed.filter(b=>b.type!=='eight');
     if(nonEight.length>0){
-      flashMsg('Nice break! Keep shooting — claim your type!','#5cf');
-      document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();
-    } else {
-      flashMsg('No balls pocketed — turn passes!');
-      doBotTurn();
-    }
-    return;
-  }
-
-  /* ---- TYPES NOT YET ASSIGNED — first ball in assigns them ---- */
-  if(!typesAssigned){
-    const nonEight=pocketed.filter(b=>b.type!=='eight');
-    if(scratch){
-      flashMsg((wasBot?'Bot':'You')+' scratched — turn passes!');
-      setTimeout(()=>{
-        if(!wasBot){doBotTurn();}
-        else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
-      },760);
-      return;
-    }
-    if(nonEight.length>0 && shotContactedOwn){
-      /* Assign types: shooter gets the type of the first ball they pocketed */
-      const firstType=nonEight[0].type; /* 'solid' or 'stripe' */
+      /* Types assigned immediately on break — first ball type = breaker's type */
+      const firstType=nonEight[0].type;
       if(!wasBot){
-        p1Type=firstType; p2Type=firstType==='solid'?'stripe':'solid';
-        flashMsg('You claimed '+( p1Type==='solid'?'Solids 1–7':'Stripes 9–15')+'!','#5cf');
+        p1Type=firstType;p2Type=firstType==='solid'?'stripe':'solid';
+        flashMsg('You got '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15')+'! Keep shooting.','#5cf');
       } else {
-        p2Type=firstType; p1Type=firstType==='solid'?'stripe':'solid';
-        flashMsg('Bot claimed '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids':'Stripes'),'#ffa');
+        p2Type=firstType;p1Type=firstType==='solid'?'stripe':'solid';
+        flashMsg('Bot got '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15'),  '#ffa');
       }
       typesAssigned=true;
-      /* Keep turn since they pocketed */
       if(wasBot){doBotTurn();}
       else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
     } else {
-      /* Missed or hit wrong — pass turn, still unassigned */
-      flashMsg((wasBot?'Bot':'You')+(!shotContactedOwn?' hit wrong ball':' missed')+' — turn passes!');
+      /* No balls pocketed on break — table open, turn passes */
+      flashMsg('No balls pocketed on break — turn passes.');
       if(!wasBot){doBotTurn();}
       else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
     }
     return;
   }
 
-  /* ---- NORMAL PLAY — types assigned ---- */
+  /* ===================== OPEN TABLE (types not yet assigned) ===================== */
+  if(!typesAssigned){
+    if(scratch){
+      flashMsg((wasBot?'Bot':'You')+' scratched — ball-in-hand in the kitchen!');
+      giveKitchen(!wasBot);return;
+    }
+    /* On open table any ball can be hit first — just need rail or pocket after contact */
+    const legalShot=shotContactedOwn&&(railContactedThisShot||nonEight.length>0);
+    if(nonEight.length>0&&legalShot){
+      const firstType=nonEight[0].type;
+      if(!wasBot){
+        p1Type=firstType;p2Type=firstType==='solid'?'stripe':'solid';
+        flashMsg('You claimed '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15')+'!','#5cf');
+      } else {
+        p2Type=firstType;p1Type=firstType==='solid'?'stripe':'solid';
+        flashMsg('Bot claimed '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15'),'#ffa');
+      }
+      typesAssigned=true;
+      if(wasBot){doBotTurn();}
+      else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    } else {
+      const reason=!shotContactedOwn?'No ball contacted':(!railContactedThisShot&&nonEight.length===0)?'No rail contacted after hit':'Missed';
+      flashMsg((wasBot?'Bot':'You')+' — '+reason+'. Turn passes, ball-in-hand in kitchen!');
+      giveKitchen(!wasBot);
+    }
+    return;
+  }
+
+  /* ===================== NORMAL PLAY ===================== */
   const myType=wasBot?p2Type:p1Type;
   const pocketedOwn=pocketed.filter(b=>b.type===myType).length;
+  /* Check legal shot: must contact own ball first, then rail or pocket */
+  const legalContact=shotContactedOwn;
+  const legalContinuation=railContactedThisShot||pocketed.length>0;
 
   if(scratch){
-    flashMsg((wasBot?'Bot':'You')+' scratched — turn passes!');
-    setTimeout(()=>{
-      if(!wasBot){doBotTurn();}
-      else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
-    },760);
-    return;
+    flashMsg((wasBot?'Bot':'You')+' scratched — ball-in-hand in the kitchen!');
+    giveKitchen(!wasBot);return;
   }
-  if(!shotContactedOwn){
-    flashMsg((wasBot?'Bot':'You')+' hit wrong ball — turn passes!');
-    if(!wasBot){doBotTurn();}
-    else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
-    return;
+  if(!legalContact){
+    flashMsg((wasBot?'Bot':'You')+' hit wrong ball first — foul! Ball-in-hand in kitchen.');
+    giveKitchen(!wasBot);return;
+  }
+  if(!legalContinuation){
+    flashMsg((wasBot?'Bot':'You')+' — no rail/pocket after contact — foul! Ball-in-hand in kitchen.');
+    giveKitchen(!wasBot);return;
   }
   if(pocketedOwn>0){
-    flashMsg(pocketedOwn>1?'Nice — '+pocketedOwn+' in!':'Good shot!','#5cf');
+    flashMsg(pocketedOwn>1?'Nice — '+pocketedOwn+' in!':'Good shot! Keep going.','#5cf');
     if(wasBot){doBotTurn();}
     else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
     return;
   }
-  flashMsg((wasBot?'Bot':'You')+' missed — turn passes!');
+  /* Hit own ball, legal, but nothing went in */
+  flashMsg((wasBot?'Bot':'You')+' missed — turn passes.');
   if(!wasBot){doBotTurn();}
   else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
 }
@@ -1437,17 +1499,38 @@ function isBlocked(a,b){
    INPUT
    ===================================================== */
 GC.addEventListener('mousemove',e=>{
-  if(shooting||botTurn||gameOver||cue.pocketed)return;
   const rect=GC.getBoundingClientRect(),sx=W/rect.width;
   const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sx;
+
+  /* Placing cue ball in kitchen */
+  if(placingCue&&!botTurn){
+    const kx=kitchenX();
+    const cx2=Math.max(CUSHION+CUE_R+2,Math.min(kx-CUE_R-2,mx));
+    const cy2=Math.max(CUSHION+CUE_R+2,Math.min(H-CUSHION-CUE_R-2,my));
+    cue.x=cx2;cue.y=cy2;cue.vx=0;cue.vy=0;
+    render();return;
+  }
+
+  if(shooting||botTurn||gameOver||cue.pocketed)return;
   const pdx=mx-CBP.x,pdy=my-CBP.y;
   if(pdx*pdx+pdy*pdy>CBP.r*CBP.r)angle=Math.atan2(my-cue.y,mx-cue.x);
   render();
 });
+
 GC.addEventListener('mousedown',e=>{
-  if(shooting||botTurn||gameOver||cue.pocketed)return;
+  if(shooting||botTurn||gameOver)return;
   const rect=GC.getBoundingClientRect(),sx=W/rect.width;
   const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sx;
+
+  /* During placing — just move cue */
+  if(placingCue&&!botTurn){
+    const kx=kitchenX();
+    cue.x=Math.max(CUSHION+CUE_R+2,Math.min(kx-CUE_R-2,mx));
+    cue.y=Math.max(CUSHION+CUE_R+2,Math.min(H-CUSHION-CUE_R-2,my));
+    render();e.stopPropagation();return;
+  }
+
+  if(cue.pocketed)return;
   const pdx=mx-CBP.x,pdy=my-CBP.y;
   if(pdx*pdx+pdy*pdy<=CBP.r*CBP.r){
     hitX=Math.max(-1,Math.min(1,pdx/CBP.r));hitY=Math.max(-1,Math.min(1,pdy/CBP.r));
@@ -1455,29 +1538,63 @@ GC.addEventListener('mousedown',e=>{
     render();e.stopPropagation();
   }
 });
+
 GC.addEventListener('click',e=>{
-  if(shooting||botTurn||gameOver||cue.pocketed)return;
   const rect=GC.getBoundingClientRect(),sx=W/rect.width;
   const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sx;
+
+  /* Confirm cue placement */
+  if(placingCue&&!botTurn){
+    placingCue=false;ballInHandKitchen=false;
+    document.getElementById('shbtn').disabled=false;
+    flashMsg('');startClock(30);updateUI();render();return;
+  }
+
+  if(shooting||botTurn||gameOver||cue.pocketed)return;
   const pdx=mx-CBP.x,pdy=my-CBP.y;
   if(pdx*pdx+pdy*pdy<=CBP.r*CBP.r)return;
   shootBall(currentPower,false);
 });
-document.getElementById('shbtn').addEventListener('click',()=>{if(shooting||botTurn||gameOver||cue.pocketed)return;shootBall(currentPower,false);});
-document.getElementById('pslider').addEventListener('input',e=>{setPower(parseInt(e.target.value));if(!shooting&&!botTurn&&!gameOver)render();});
+
+document.getElementById('shbtn').addEventListener('click',()=>{
+  if(placingCue&&!botTurn){
+    /* Shoot button confirms placement */
+    placingCue=false;ballInHandKitchen=false;
+    document.getElementById('shbtn').disabled=false;
+    flashMsg('');startClock(30);updateUI();render();return;
+  }
+  if(shooting||botTurn||gameOver||cue.pocketed)return;
+  shootBall(currentPower,false);
+});
+
+document.getElementById('pslider').addEventListener('input',e=>{
+  setPower(parseInt(e.target.value));if(!shooting&&!botTurn&&!gameOver)render();
+});
+
 document.addEventListener('keydown',e=>{
   if(e.code!=='Enter'||e.repeat)return;
+  /* Enter during placement = confirm */
+  if(placingCue&&!botTurn){
+    placingCue=false;ballInHandKitchen=false;
+    document.getElementById('shbtn').disabled=false;
+    flashMsg('');startClock(30);updateUI();render();return;
+  }
   if(shooting||botTurn||gameOver||cue.pocketed)return;
   enterHeld=true;enterChargeStart=Date.now();setPower(1);
   enterRampId=setInterval(()=>{if(!enterHeld){clearInterval(enterRampId);return;}setPower(1+(Math.min(2500,Date.now()-enterChargeStart)/2500)*9);render();},40);
 });
+
 document.addEventListener('keyup',e=>{
   if(e.code!=='Enter')return;if(!enterHeld)return;
   clearInterval(enterRampId);enterHeld=false;
   if(shooting||botTurn||gameOver||cue.pocketed)return;
   shootBall(currentPower,false);
 });
-document.getElementById('newbtn').addEventListener('click',()=>{clearInterval(enterRampId);enterHeld=false;cancelAnimationFrame(gameAnimFrame);physicsRunning=false;initGame();});
+
+document.getElementById('newbtn').addEventListener('click',()=>{
+  clearInterval(enterRampId);enterHeld=false;
+  cancelAnimationFrame(gameAnimFrame);physicsRunning=false;initGame();
+});
 
 /* =====================================================
    BOOT
