@@ -177,17 +177,17 @@ header{width:100%;max-width:980px;display:flex;align-items:center;justify-conten
     </div>
   </header>
   <div class="scoreboard">
-    <div class="pcard active" id="p1c"><div class="lbl">Solids · 1–7</div><div class="pnm" id="p1nm">Player</div><div class="rack" id="p1r"></div></div>
+    <div class="pcard active" id="p1c"><div class="lbl">Type: ?</div><div class="pnm" id="p1nm">Player</div><div class="rack" id="p1r"></div></div>
     <div class="scenter">
       <div class="tlbl">Status</div>
-      <div id="smsg">Aim &amp; shoot</div>
+      <div id="smsg">Break!</div>
       <div id="mflash"></div>
       <div id="shot-clock">
         <div id="clock-bar-wrap"><div id="clock-bar"></div></div>
         <div id="clock-num">30</div>
       </div>
     </div>
-    <div class="pcard" id="p2c" style="text-align:right"><div class="lbl">Stripes · 9–15</div><div class="pnm" id="p2nm">Bot</div><div class="rack" id="p2r" style="justify-content:flex-end"></div></div>
+    <div class="pcard" id="p2c" style="text-align:right"><div class="lbl">Type: ?</div><div class="pnm" id="p2nm">Bot</div><div class="rack" id="p2r" style="justify-content:flex-end"></div></div>
   </div>
   <div class="twrap"><div class="touter">
     <canvas id="gc"></canvas>
@@ -633,11 +633,12 @@ const pockets=[
 ];
 const SOLID_C=['#e8b84b','#2a6fd4','#d93030','#8b3dc8','#d46e1a','#1e9450','#c04070','#d45520'];
 const STRIPE_C=['#e8b84b','#2a6fd4','#d93030','#8b3dc8','#d46e1a','#1e9450','#c04070','#d45520'];
-const CBP={x:W-76,y:44,r:26};
+const CBP={x:W-38, y:H/2, r:26};
 
 let balls,cue,angle,shooting,botTurn,gameOver,gameAnimFrame;
 let physicsRunning=false,botAiming=false;
-let isBreakShot=false; /* first shot of game */
+let isBreakShot=false;
+let typesAssigned=false, p1Type=null, p2Type=null; /* assigned after first pocket post-break */
 let currentShooterIsBot=false, shotContactedOwn=false;
 let pocketedThisTurn=[], enterHeld=false, enterRampId=null, currentPower=5;
 let enterChargeStart=0, hitX=0, hitY=0;
@@ -697,6 +698,8 @@ function initGame(){
   botAiming=false;currentShooterIsBot=false;shotContactedOwn=false;
   pocketedThisTurn=[];enterHeld=false;clearInterval(enterRampId);
   hitX=0;hitY=0;chalkUses=0;isBreakShot=true;
+  /* Types not assigned until first ball pocketed after break */
+  typesAssigned=false; p1Type=null; p2Type=null;
   balls=rackPositions().map(b=>({...b,vx:0,vy:0,r:BALL_R,pocketed:false,rot:0}));
   cue={x:W*.25,y:H/2,vx:0,vy:0,r:CUE_R,type:'cue',color:'#f5f5f5',pocketed:false};
   angle=0;
@@ -734,14 +737,30 @@ function timeOut(){
    UI
    ===================================================== */
 function updateUI(){
-  const solids=balls.filter(b=>b.type==='solid');
-  const stripes=balls.filter(b=>b.type==='stripe');
-  document.getElementById('p1r').innerHTML=solids.map(b=>`<div class="pip${b.pocketed?' gone':''}" style="background:${b.color}"></div>`).join('');
-  document.getElementById('p2r').innerHTML=stripes.map(b=>`<div class="pip${b.pocketed?' gone':''}" style="background:${b.color}"></div>`).join('');
   const p1c=document.getElementById('p1c'),p2c=document.getElementById('p2c'),st=document.getElementById('smsg');
+  const lbl1=document.getElementById('p1c').querySelector('.lbl');
+  const lbl2=document.getElementById('p2c').querySelector('.lbl');
+
+  if(!typesAssigned){
+    /* Types not yet decided — show all balls as unknown */
+    lbl1.textContent='Type: ?';
+    lbl2.textContent='Type: ?';
+    document.getElementById('p1r').innerHTML='<span style="font-size:9px;color:rgba(245,240,232,.3);letter-spacing:1px">Pocket a ball to assign</span>';
+    document.getElementById('p2r').innerHTML='';
+  } else {
+    const myBalls  =balls.filter(b=>b.type===p1Type);
+    const botBalls =balls.filter(b=>b.type===p2Type);
+    const myLabel  =p1Type==='solid'?'Solids · 1–7':'Stripes · 9–15';
+    const botLabel =p2Type==='solid'?'Solids · 1–7':'Stripes · 9–15';
+    lbl1.textContent=myLabel;
+    lbl2.textContent=botLabel;
+    document.getElementById('p1r').innerHTML=myBalls.map(b=>`<div class="pip${b.pocketed?' gone':''}" style="background:${b.color}"></div>`).join('');
+    document.getElementById('p2r').innerHTML=botBalls.map(b=>`<div class="pip${b.pocketed?' gone':''}" style="background:${b.color}"></div>`).join('');
+  }
+
   if(gameOver){p1c.classList.remove('active');p2c.classList.remove('active');st.textContent='Game Over';}
   else if(botTurn){p1c.classList.remove('active');p2c.classList.add('active');st.textContent='Bot thinking…';}
-  else{p1c.classList.add('active');p2c.classList.remove('active');st.textContent='Your turn';}
+  else{p1c.classList.add('active');p2c.classList.remove('active');st.textContent=typesAssigned?'Your turn':'Break — pocket to claim!';}
 }
 
 let flashTimer=null;
@@ -757,27 +776,31 @@ function flashMsg(msg,color='#ff6b6b'){
    ===================================================== */
 function render(){
   GX.clearRect(0,0,W,H);
-  GX.fillStyle='#0b1820';GX.fillRect(0,0,W,H);
-  const ix=CUSHION,iy=CUSHION,iw=W-CUSHION*2,ih=H-CUSHION*2,s3=iw/3;
-  /* Afghan flag stripes */
-  GX.fillStyle='#0f0f1a';GX.fillRect(ix,iy,s3,ih);
-  GX.fillStyle='#091f14';GX.fillRect(ix+s3,iy,s3,ih);
-  GX.fillStyle='#1e0808';GX.fillRect(ix+s3*2,iy,s3,ih);
-  /* felt texture */
-  GX.fillStyle='rgba(0,0,0,0.055)';for(let yy=iy;yy<iy+ih;yy+=5)GX.fillRect(ix,yy,iw,1);
-  /* overhead bloom */
-  const bloom=GX.createRadialGradient(W/2,H*.36,0,W/2,H*.36,Math.min(iw,ih)*.56);
-  bloom.addColorStop(0,'rgba(255,255,255,0.052)');bloom.addColorStop(1,'rgba(0,0,0,0)');
-  GX.fillStyle=bloom;GX.fillRect(ix,iy,iw,ih);
-  /* emblem */
+  GX.fillStyle='#0e3d1e'; GX.fillRect(0,0,W,H); /* dark green outer rail base */
+  const ix=CUSHION,iy=CUSHION,iw=W-CUSHION*2,ih=H-CUSHION*2;
+  /* ---- Pool table felt — classic green ---- */
+  /* Base felt colour */
+  GX.fillStyle='#1a6b3c'; GX.fillRect(ix,iy,iw,ih);
+
+  /* Felt nap direction — subtle darker grain lines */
+  GX.fillStyle='rgba(0,0,0,0.04)';
+  for(let yy=iy;yy<iy+ih;yy+=4) GX.fillRect(ix,yy,iw,2);
+
+  /* Slight tonal variation — lighter center, darker edges */
+  const feltVig=GX.createRadialGradient(W/2,H/2,0,W/2,H/2,Math.max(iw,ih)*.62);
+  feltVig.addColorStop(0,'rgba(255,255,255,0.06)');
+  feltVig.addColorStop(.6,'rgba(0,0,0,0)');
+  feltVig.addColorStop(1,'rgba(0,0,0,0.18)');
+  GX.fillStyle=feltVig; GX.fillRect(ix,iy,iw,ih);
+
+  /* Overhead lamp bloom */
+  const bloom=GX.createRadialGradient(W/2,H*.34,0,W/2,H*.34,Math.min(iw,ih)*.55);
+  bloom.addColorStop(0,'rgba(255,240,200,0.07)');
+  bloom.addColorStop(1,'rgba(0,0,0,0)');
+  GX.fillStyle=bloom; GX.fillRect(ix,iy,iw,ih);
+
+  /* Afghan emblem — subtle watermark on felt */
   drawEmblem(W/2,H/2,50);
-  /* stripe dividers */
-  for(const sx of [ix+s3,ix+s3*2]){
-    const gd=GX.createLinearGradient(sx,iy,sx,iy+ih);
-    gd.addColorStop(0,'rgba(255,255,255,0)');gd.addColorStop(.5,'rgba(255,255,255,0.09)');gd.addColorStop(1,'rgba(255,255,255,0)');
-    GX.strokeStyle=gd;GX.lineWidth=1;GX.setLineDash([]);
-    GX.beginPath();GX.moveTo(sx,iy);GX.lineTo(sx,iy+ih);GX.stroke();
-  }
   /* 3D cushion bevels */
   const BV=7;
   GX.fillStyle='rgba(255,255,255,0.1)';GX.fillRect(ix,iy,iw,BV);
@@ -790,11 +813,11 @@ function render(){
   GX.beginPath();GX.moveTo(ix,iy);GX.lineTo(ix+iw,iy);GX.stroke();
   GX.beginPath();GX.moveTo(ix,iy);GX.lineTo(ix,iy+ih);GX.stroke();
   /* baulk */
-  GX.strokeStyle='rgba(255,255,255,0.06)';GX.lineWidth=1;GX.setLineDash([8,7]);
+  GX.strokeStyle='rgba(255,255,255,0.12)';GX.lineWidth=1;GX.setLineDash([8,7]);
   GX.beginPath();GX.moveTo(W*.28,iy+BV);GX.lineTo(W*.28,iy+ih-BV);GX.stroke();
   GX.setLineDash([]);
   GX.beginPath();GX.arc(W*.28,H/2,46,Math.PI*1.5,Math.PI*.5);
-  GX.strokeStyle='rgba(255,255,255,0.05)';GX.lineWidth=1;GX.stroke();
+  GX.strokeStyle='rgba(255,255,255,0.1)';GX.lineWidth=1;GX.stroke();
   /* pockets */
   for(const p of pockets)drawPocket(p);
   /* chalk */
@@ -838,25 +861,59 @@ function drawEmblem(cx,cy,es){
 }
 
 function drawPocket(p){
-  GX.beginPath();GX.arc(p.x,p.y,POCK_R+5,0,Math.PI*2);
-  GX.fillStyle='rgba(0,0,0,0.52)';GX.fill();
-  GX.beginPath();GX.arc(p.x,p.y,POCK_R,0,Math.PI*2);
-  GX.fillStyle='#030507';GX.fill();
-  GX.beginPath();GX.arc(p.x,p.y,POCK_R-3,0,Math.PI*2);
-  GX.fillStyle='#000';GX.fill();
-  GX.save();GX.beginPath();GX.arc(p.x,p.y,POCK_R,0,Math.PI*2);GX.clip();
-  GX.strokeStyle='rgba(120,85,28,.48)';GX.lineWidth=.65;
-  for(let a=0;a<Math.PI*2;a+=Math.PI/6){
-    GX.beginPath();GX.moveTo(p.x,p.y);
-    GX.lineTo(p.x+Math.cos(a)*POCK_R*2,p.y+Math.sin(a)*POCK_R*2);GX.stroke();
+  /* Outer shadow ring */
+  GX.beginPath(); GX.arc(p.x,p.y,POCK_R+5,0,Math.PI*2);
+  GX.fillStyle='rgba(0,0,0,0.55)'; GX.fill();
+
+  /* Leather collar — dark brown ring */
+  GX.beginPath(); GX.arc(p.x,p.y,POCK_R+2,0,Math.PI*2);
+  GX.fillStyle='#2a1505'; GX.fill();
+  GX.beginPath(); GX.arc(p.x,p.y,POCK_R+2,0,Math.PI*2);
+  GX.strokeStyle='rgba(120,70,20,0.8)'; GX.lineWidth=1.5; GX.stroke();
+
+  /* Pocket hole — dark centre */
+  GX.beginPath(); GX.arc(p.x,p.y,POCK_R,0,Math.PI*2);
+  GX.fillStyle='#0a0a0a'; GX.fill();
+
+  /* ---- WHITE NET ---- */
+  GX.save();
+  GX.beginPath(); GX.arc(p.x,p.y,POCK_R,0,Math.PI*2); GX.clip();
+
+  /* Net background — very dark so white lines pop */
+  GX.fillStyle='#111'; GX.fillRect(p.x-POCK_R,p.y-POCK_R,POCK_R*2,POCK_R*2);
+
+  /* Radial spoke lines — white */
+  const SPOKES=12;
+  for(let i=0;i<SPOKES;i++){
+    const a=(i/SPOKES)*Math.PI*2;
+    GX.strokeStyle=`rgba(255,255,255,${0.55+0.2*(i%2)})`; GX.lineWidth=0.6;
+    GX.beginPath(); GX.moveTo(p.x,p.y);
+    GX.lineTo(p.x+Math.cos(a)*POCK_R*2, p.y+Math.sin(a)*POCK_R*2);
+    GX.stroke();
   }
-  for(let r=4;r<=POCK_R+2;r+=5){
-    GX.beginPath();GX.arc(p.x,p.y,r,0,Math.PI*2);
-    GX.strokeStyle=`rgba(120,85,28,${.5-r/POCK_R*.1})`;GX.stroke();
+
+  /* Concentric ring lines — white */
+  for(let r=4; r<=POCK_R+2; r+=4){
+    const alpha=Math.max(0.15, 0.65 - r/POCK_R*0.45);
+    GX.strokeStyle=`rgba(255,255,255,${alpha})`; GX.lineWidth=0.7;
+    GX.beginPath(); GX.arc(p.x,p.y,r,0,Math.PI*2); GX.stroke();
   }
+
+  /* Subtle depth gradient — darker toward bottom to give net depth */
+  const netShade=GX.createRadialGradient(p.x,p.y,0,p.x,p.y,POCK_R);
+  netShade.addColorStop(0,'rgba(0,0,0,0.5)');
+  netShade.addColorStop(0.6,'rgba(0,0,0,0.15)');
+  netShade.addColorStop(1,'rgba(0,0,0,0.55)');
+  GX.fillStyle=netShade; GX.fillRect(p.x-POCK_R,p.y-POCK_R,POCK_R*2,POCK_R*2);
+
   GX.restore();
-  GX.beginPath();GX.arc(p.x,p.y,POCK_R,0,Math.PI*2);
-  GX.strokeStyle='rgba(0,200,255,.16)';GX.lineWidth=1.1;GX.stroke();
+
+  /* Pocket rim highlight — inner edge of leather */
+  GX.beginPath(); GX.arc(p.x,p.y,POCK_R,0,Math.PI*2);
+  GX.strokeStyle='rgba(180,120,40,0.5)'; GX.lineWidth=1; GX.stroke();
+  /* Top specular on leather collar */
+  GX.beginPath(); GX.arc(p.x,p.y-1,POCK_R+1,Math.PI*1.1,Math.PI*1.9);
+  GX.strokeStyle='rgba(255,200,100,0.18)'; GX.lineWidth=2; GX.stroke();
 }
 
 function drawChalk(){
@@ -1003,36 +1060,63 @@ function drawBall(b){
 
 function drawHitPanel(){
   const {x:px,y:py,r:pr}=CBP;
+  /* Card opens to the LEFT since panel is on the right edge */
+  const cardW=(pr+10)*2, cardH=(pr+10)*2+22;
+  const cardX=px-cardW+pr+10; /* right-align card to ball center */
+  const cardY=py-pr-12;
   GX.save();
-  GX.fillStyle='rgba(4,8,16,.8)';rRect(GX,px-pr-9,py-pr-13,(pr+9)*2,(pr+9)*2+25,9);GX.fill();
+  GX.fillStyle='rgba(4,8,16,.82)';
+  rRect(GX,cardX,cardY,cardW,cardH,9);GX.fill();
   GX.strokeStyle='rgba(0,212,255,.26)';GX.lineWidth=1;GX.stroke();
+  /* Title above ball */
   GX.fillStyle='rgba(0,212,255,.68)';GX.font='bold 7px DM Sans,sans-serif';
-  GX.textAlign='center';GX.textBaseline='top';GX.fillText('HIT POINT',px,py-pr-9);
+  GX.textAlign='center';GX.textBaseline='top';GX.fillText('HIT POINT',px,cardY+4);
+  /* Direction labels */
   GX.fillStyle='rgba(255,255,255,.26)';GX.font='7px DM Sans,sans-serif';GX.textBaseline='middle';
-  GX.fillText('↑',px,py-pr-2);GX.fillText('↓',px,py+pr+2);
-  GX.fillText('L',px-pr-4,py);GX.fillText('R',px+pr+4,py);
+  GX.fillText('↑',px,py-pr-2);
+  GX.fillText('↓',px,py+pr+2);
+  GX.fillText('L',px-pr-4,py);
+  /* no R label — right side is the wall */
+  /* Ball shadow */
   GX.beginPath();GX.arc(px+1.2,py+2,pr,0,Math.PI*2);GX.fillStyle='rgba(0,0,0,.42)';GX.fill();
+  /* Ball gradient */
   const rg=GX.createRadialGradient(px-pr*.28,py-pr*.28,pr*.04,px,py,pr);
   rg.addColorStop(0,'#fff');rg.addColorStop(.43,'#f0f0f0');rg.addColorStop(.85,'#d0d0d0');rg.addColorStop(1,'#b0b0b0');
   GX.beginPath();GX.arc(px,py,pr,0,Math.PI*2);GX.fillStyle=rg;GX.fill();
+  /* Crosshair */
   GX.strokeStyle='rgba(0,190,220,.16)';GX.lineWidth=.7;GX.setLineDash([3,3]);
   GX.beginPath();GX.moveTo(px-pr,py);GX.lineTo(px+pr,py);GX.stroke();
   GX.beginPath();GX.moveTo(px,py-pr);GX.lineTo(px,py+pr);GX.stroke();
   GX.setLineDash([]);
-  for(const fr of[.34,.67]){GX.beginPath();GX.arc(px,py,pr*fr,0,Math.PI*2);GX.strokeStyle='rgba(0,190,220,.11)';GX.lineWidth=.6;GX.stroke();}
-  const hx=px+hitX*pr*.84,hy=py+hitY*pr*.84;
+  /* Zone rings */
+  for(const fr of[.34,.67]){
+    GX.beginPath();GX.arc(px,py,pr*fr,0,Math.PI*2);
+    GX.strokeStyle='rgba(0,190,220,.11)';GX.lineWidth=.6;GX.stroke();
+  }
+  /* Hit marker */
+  const hx=px+hitX*pr*.84, hy=py+hitY*pr*.84;
   GX.beginPath();GX.arc(hx,hy,6.5,0,Math.PI*2);GX.fillStyle='rgba(255,50,50,.24)';GX.fill();
   GX.strokeStyle='#ff3333';GX.lineWidth=1.2;GX.stroke();
   GX.beginPath();GX.arc(hx,hy,2.8,0,Math.PI*2);GX.fillStyle='#ff2020';GX.fill();
+  /* Specular */
   const sp=GX.createRadialGradient(px-pr*.26,py-pr*.28,0,px-pr*.26,py-pr*.28,pr*.38);
   sp.addColorStop(0,'rgba(255,255,255,.7)');sp.addColorStop(1,'rgba(255,255,255,0)');
   GX.beginPath();GX.arc(px,py,pr,0,Math.PI*2);GX.fillStyle=sp;GX.fill();
-  GX.beginPath();GX.arc(px,py,pr,0,Math.PI*2);GX.strokeStyle='rgba(0,0,0,.13)';GX.lineWidth=.7;GX.stroke();
+  /* Edge */
+  GX.beginPath();GX.arc(px,py,pr,0,Math.PI*2);
+  GX.strokeStyle='rgba(0,0,0,.13)';GX.lineWidth=.7;GX.stroke();
+  /* Spin label */
   const d2=Math.sqrt(hitX*hitX+hitY*hitY);
   let lbl='CENTER';
-  if(d2>.15){const pts=[];if(hitY<-.2)pts.push('TOP');if(hitY>.2)pts.push('BACK');if(hitX<-.2)pts.push('L');if(hitX>.2)pts.push('R');lbl=pts.join('+')||'OFFSET';}
+  if(d2>.15){
+    const pts=[];
+    if(hitY<-.2)pts.push('TOP');if(hitY>.2)pts.push('BACK');
+    if(hitX<-.2)pts.push('L');if(hitX>.2)pts.push('R');
+    lbl=pts.join('+')||'OFFSET';
+  }
   GX.fillStyle='rgba(255,172,50,.88)';GX.font='bold 7px DM Sans,sans-serif';
-  GX.textAlign='center';GX.textBaseline='top';GX.fillText(lbl,px,py+pr+5);
+  GX.textAlign='center';GX.textBaseline='top';
+  GX.fillText(lbl,px,py+pr+5);
   GX.textAlign='left';GX.textBaseline='alphabetic';GX.restore();
 }
 
@@ -1112,10 +1196,13 @@ function collideBalls(a,b){
     a.x-=nx*ov;a.y-=ny*ov;b.x+=nx*ov;b.y+=ny*ov;
     const dvx=a.vx-b.vx,dvy=a.vy-b.vy,dot=dvx*nx+dvy*ny;
     if(dot>0){a.vx-=dot*nx*.93;a.vy-=dot*ny*.93;b.vx+=dot*nx*.93;b.vy+=dot*ny*.93;}
-    const myType=currentShooterIsBot?'stripe':'solid';
-    if((a.type==='cue'&&b.type===myType)||(b.type==='cue'&&a.type===myType))shotContactedOwn=true;
-    /* break shot — any contact counts */
-    if(isBreakShot&&(a.type==='cue'||b.type==='cue'))shotContactedOwn=true;
+    const myType=currentShooterIsBot?(p2Type||'stripe'):(p1Type||'solid');
+    /* Before types assigned, any non-cue contact counts (break / open table) */
+    if(!typesAssigned){
+      if((a.type==='cue'&&b.type!=='cue')||(b.type==='cue'&&a.type!=='cue'))shotContactedOwn=true;
+    } else {
+      if((a.type==='cue'&&b.type===myType)||(b.type==='cue'&&a.type===myType))shotContactedOwn=true;
+    }
   }
 }
 
@@ -1130,11 +1217,18 @@ function checkPockets(active){
           setTimeout(()=>{cue.pocketed=false;cue.x=W*.23;cue.y=Math.max(CUSHION+CUE_R+4,Math.min(H-CUSHION-CUE_R-4,H/2+(Math.random()-.5)*55));cue.vx=0;cue.vy=0;},720);
         } else if(b.type==='eight'){
           gameOver=true;
-          const sl=balls.filter(x=>x.type==='solid'&&!x.pocketed).length;
-          const tl=balls.filter(x=>x.type==='stripe'&&!x.pocketed).length;
+          const myT=currentShooterIsBot?p2Type:p1Type;
+          const myBallsLeft=myT?balls.filter(x=>x.type===myT&&!x.pocketed).length:1;
           let wt,ws;
-          if(!currentShooterIsBot){wt=sl===0?p1Name+' Wins! 🎱':'Bot Wins!';ws=sl===0?'Textbook finish!':p1Name+' sank the 8 too early!';}
-          else{wt=tl===0?p2Name+' Wins!':p1Name+' Wins! 🎱';ws=tl===0?'Bot clears and sinks!':'Bot sank the 8 too early — you win!';}
+          if(!currentShooterIsBot){
+            if(myBallsLeft===0){wt=p1Name+' Wins! 🎱';ws='Perfect finish — all solids cleared!';}
+            else{wt='Bot Wins!';ws=p1Name+' sank the 8 too early!';}
+          } else {
+            const botT=p2Type;
+            const botLeft=botT?balls.filter(x=>x.type===botT&&!x.pocketed).length:1;
+            if(botLeft===0){wt=p2Name+' Wins!';ws='Bot clears and sinks the 8!';}
+            else{wt=p1Name+' Wins! 🎱';ws='Bot sank the 8 too early — you win!';}
+          }
           document.getElementById('wtitle').textContent=wt;
           document.getElementById('wsub').textContent=ws;
           document.getElementById('goverlay').classList.add('show');
@@ -1149,36 +1243,90 @@ function checkPockets(active){
 function endTurn(){
   const pocketed=pocketedThisTurn.slice();pocketedThisTurn=[];
   const wasBot=currentShooterIsBot;
-  const myType=wasBot?'stripe':'solid';
-  const pocketedOwn=pocketed.filter(b=>b.type===myType).length;
   const scratch=cue.pocketed;
 
-  /* After break shot — any ball pocketed is valid, no wrong-ball rule */
+  /* ---- BREAK SHOT ---- */
   if(isBreakShot){
     isBreakShot=false;
-    if(scratch){flashMsg('Scratch on the break — turn passes!');doBotTurn();return;}
-    if(pocketedOwn>0){flashMsg('Nice break — keep shooting!','#5cf');document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();return;}
-    /* no balls pocketed on break = pass */
-    doBotTurn();return;
+    if(scratch){
+      flashMsg('Scratch on the break — turn passes!');
+      setTimeout(()=>{doBotTurn();},760);
+      return;
+    }
+    /* After break: if balls were pocketed, shooter keeps turn but types still unassigned
+       — they get assigned on the NEXT ball pocketed (first ball in after break) */
+    const nonEight=pocketed.filter(b=>b.type!=='eight');
+    if(nonEight.length>0){
+      flashMsg('Nice break! Keep shooting — claim your type!','#5cf');
+      document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();
+    } else {
+      flashMsg('No balls pocketed — turn passes!');
+      doBotTurn();
+    }
+    return;
   }
+
+  /* ---- TYPES NOT YET ASSIGNED — first ball in assigns them ---- */
+  if(!typesAssigned){
+    const nonEight=pocketed.filter(b=>b.type!=='eight');
+    if(scratch){
+      flashMsg((wasBot?'Bot':'You')+' scratched — turn passes!');
+      setTimeout(()=>{
+        if(!wasBot){doBotTurn();}
+        else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+      },760);
+      return;
+    }
+    if(nonEight.length>0 && shotContactedOwn){
+      /* Assign types: shooter gets the type of the first ball they pocketed */
+      const firstType=nonEight[0].type; /* 'solid' or 'stripe' */
+      if(!wasBot){
+        p1Type=firstType; p2Type=firstType==='solid'?'stripe':'solid';
+        flashMsg('You claimed '+( p1Type==='solid'?'Solids 1–7':'Stripes 9–15')+'!','#5cf');
+      } else {
+        p2Type=firstType; p1Type=firstType==='solid'?'stripe':'solid';
+        flashMsg('Bot claimed '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids':'Stripes'),'#ffa');
+      }
+      typesAssigned=true;
+      /* Keep turn since they pocketed */
+      if(wasBot){doBotTurn();}
+      else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    } else {
+      /* Missed or hit wrong — pass turn, still unassigned */
+      flashMsg((wasBot?'Bot':'You')+(!shotContactedOwn?' hit wrong ball':' missed')+' — turn passes!');
+      if(!wasBot){doBotTurn();}
+      else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    }
+    return;
+  }
+
+  /* ---- NORMAL PLAY — types assigned ---- */
+  const myType=wasBot?p2Type:p1Type;
+  const pocketedOwn=pocketed.filter(b=>b.type===myType).length;
 
   if(scratch){
     flashMsg((wasBot?'Bot':'You')+' scratched — turn passes!');
     setTimeout(()=>{
       if(!wasBot){doBotTurn();}
       else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
-    },750);return;
+    },760);
+    return;
   }
   if(!shotContactedOwn){
     flashMsg((wasBot?'Bot':'You')+' hit wrong ball — turn passes!');
-    if(!wasBot){doBotTurn();}else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}return;
+    if(!wasBot){doBotTurn();}
+    else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    return;
   }
   if(pocketedOwn>0){
     flashMsg(pocketedOwn>1?'Nice — '+pocketedOwn+' in!':'Good shot!','#5cf');
-    if(wasBot){doBotTurn();}else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}return;
+    if(wasBot){doBotTurn();}
+    else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    return;
   }
   flashMsg((wasBot?'Bot':'You')+' missed — turn passes!');
-  if(!wasBot){doBotTurn();}else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+  if(!wasBot){doBotTurn();}
+  else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
 }
 
 /* =====================================================
@@ -1193,9 +1341,13 @@ function doBotTurn(){
 function botAI(){
   if(gameOver)return;
   const cfg=BOT_CFG[botDiff];
-  const stripes=balls.filter(b=>b.type==='stripe'&&!b.pocketed);
+  /* Bot targets its assigned type, or any non-eight if unassigned */
+  const botTargetType=p2Type||(typesAssigned?'stripe':null);
+  const targetBalls=botTargetType
+    ? balls.filter(b=>b.type===botTargetType&&!b.pocketed)
+    : balls.filter(b=>b.type!=='eight'&&b.type!=='cue'&&!b.pocketed);
   const eight=balls.find(b=>b.type==='eight'&&!b.pocketed);
-  const pool=stripes.length>0?stripes:(eight?[eight]:[]);
+  const pool=targetBalls.length>0?targetBalls:(eight?[eight]:[]);
   let tgtAngle,pw;
 
   if(botDiff==='easy'){
