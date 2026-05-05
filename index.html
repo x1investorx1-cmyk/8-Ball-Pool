@@ -1131,7 +1131,7 @@ function sendChat(){
   addChatMsg(msg,'me');inp.value='';
   setTimeout(()=>{if(Date.now()-lastBotChat>3000){addChatMsg(BOT_CHAT[Math.floor(Math.random()*BOT_CHAT.length)],'bot');lastBotChat=Date.now();}},800+Math.random()*1200);
 }
-document.getElementById('chat-input').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+/* chat Enter handled below with stopPropagation */
 function addChatMsg(msg,who){
   const el=document.createElement('div');el.className='chat-msg '+who;el.textContent=(who==='me'?'You: ':p2Name+': ')+msg;
   const c=document.getElementById('chat-msgs');c.appendChild(el);c.scrollTop=c.scrollHeight;
@@ -1199,9 +1199,18 @@ function updateUI(){
     document.getElementById('p1r').innerHTML=mb.map(b=>`<div class="pip${b.pocketed?' gone':''}" style="background:${b.color}"></div>`).join('');
     document.getElementById('p2r').innerHTML=bb.map(b=>`<div class="pip${b.pocketed?' gone':''}" style="background:${b.color}"></div>`).join('');
   }
-  if(gameOver){p1c.classList.remove('active');p2c.classList.remove('active');st.textContent='Game Over';}
-  else if(botTurn){p1c.classList.remove('active');p2c.classList.add('active');st.textContent='Bot thinking…';}
-  else{p1c.classList.add('active');p2c.classList.remove('active');st.textContent=typesAssigned?'Your turn':'Break!';}
+  if(gameOver){
+    p1c.classList.remove('active');p2c.classList.remove('active');
+    st.textContent='Game Over';
+  } else if(botTurn){
+    p1c.classList.remove('active');p2c.classList.add('active');
+    st.textContent=p2Name+"'s turn";
+    st.style.color='rgba(245,240,232,0.7)';
+  } else {
+    p1c.classList.add('active');p2c.classList.remove('active');
+    st.textContent=typesAssigned?'⬅ '+p1Name+"'s turn":'⬅ Your break!';
+    st.style.color='var(--gold)';
+  }
 }
 let flashTimer=null;
 function flashMsg(msg,color='#ff6b6b'){const el=document.getElementById('mflash');el.textContent=msg;el.style.color=color;clearTimeout(flashTimer);if(msg)flashTimer=setTimeout(()=>{el.textContent='';},2800);}
@@ -1423,7 +1432,25 @@ function giveKitchen(toBot){
 
 function endTurn(){
   const pocketed=pocketedThisTurn.slice();pocketedThisTurn=[];const wasBot=currentShooterIsBot,scratch=cue.pocketed;const nonEight=pocketed.filter(b=>b.type!=='eight');
-  if(isBreakShot){isBreakShot=false;if(scratch){flashMsg('Scratch on break — kitchen!');giveKitchen(!wasBot);return;}if(nonEight.length>0){const ft=nonEight[0].type;if(!wasBot){p1Type=ft;p2Type=ft==='solid'?'stripe':'solid';flashMsg('You got '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15')+'!','#5cf');}else{p2Type=ft;p1Type=ft==='solid'?'stripe':'solid';flashMsg('Bot got '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15'),'#ffa');}typesAssigned=true;if(wasBot)doBotTurn();else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}}else{flashMsg('No balls on break — turn passes.');if(!wasBot)doBotTurn();else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}}return;}
+  if(isBreakShot){
+    isBreakShot=false;
+    if(scratch){flashMsg('Scratch on break — kitchen!');giveKitchen(!wasBot);return;}
+    if(nonEight.length>0){
+      const ft=nonEight[0].type;
+      if(!wasBot){p1Type=ft;p2Type=ft==='solid'?'stripe':'solid';flashMsg('You got '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15')+'!','#5cf');}
+      else{p2Type=ft;p1Type=ft==='solid'?'stripe':'solid';flashMsg('Bot got '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15'),'#ffa');}
+      typesAssigned=true;
+      /* Keep turn — fast response */
+      if(wasBot)doBotTurn(true);
+      else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    } else {
+      flashMsg('No balls on break — turn passes.');
+      /* Fast handoff after break */
+      if(!wasBot)doBotTurn(true);
+      else{botTurn=false;document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}
+    }
+    return;
+  }
   if(!typesAssigned){if(scratch){flashMsg((wasBot?'Bot':'You')+' scratched — kitchen!');giveKitchen(!wasBot);return;}const legal=shotContactedOwn&&(railContactedThisShot||nonEight.length>0);if(nonEight.length>0&&legal){const ft=nonEight[0].type;if(!wasBot){p1Type=ft;p2Type=ft==='solid'?'stripe':'solid';flashMsg('You claimed '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15')+'!','#5cf');}else{p2Type=ft;p1Type=ft==='solid'?'stripe':'solid';flashMsg('Bot claimed '+(p2Type==='solid'?'Solids':'Stripes')+'! You have '+(p1Type==='solid'?'Solids 1-7':'Stripes 9-15'),'#ffa');}typesAssigned=true;if(wasBot)doBotTurn();else{document.getElementById('shbtn').disabled=false;startClock(30);updateUI();render();}}else{flashMsg((wasBot?'Bot':'You')+(!shotContactedOwn?' hit wrong ball':' — no rail')+'. Kitchen!');giveKitchen(!wasBot);}return;}
   const myType=wasBot?p2Type:p1Type;const own=pocketed.filter(b=>b.type===myType).length;
   if(scratch){flashMsg((wasBot?'Bot':'You')+' scratched — kitchen!');giveKitchen(!wasBot);return;}
@@ -1435,9 +1462,16 @@ function endTurn(){
 }
 
 /* Bot */
-function doBotTurn(){botTurn=true;botAiming=false;updateUI();render();clearInterval(clockInterval);setTimeout(botAI,BOT_CFG[botDiff].think);}
+function doBotTurn(fast){
+  botTurn=true;botAiming=false;updateUI();render();clearInterval(clockInterval);
+  const delay=fast?400:BOT_CFG[botDiff].think;
+  setTimeout(botAI,delay);
+}
 function botAI(){
   if(gameOver)return;const cfg=BOT_CFG[botDiff];
+  /* Use shorter sweep if this was a quick/fast handoff (think delay was 400ms) */
+  const sweepDur=cfg.sweep;
+  const holdDur=cfg.hold;
   const bt=p2Type||(typesAssigned?'stripe':null);
   const pool=bt?balls.filter(b=>b.type===bt&&!b.pocketed):balls.filter(b=>b.type!=='eight'&&b.type!=='cue'&&!b.pocketed);
   const eight=balls.find(b=>b.type==='eight'&&!b.pocketed);const targets=pool.length>0?pool:(eight?[eight]:[]);
@@ -1448,8 +1482,8 @@ function botAI(){
   else{const res=findBestShot(targets);if(res){tA=res.angle+(Math.random()-.5)*cfg.aimErr;pw=res.pw*(1+(Math.random()-.5)*cfg.pwRnd);}else{tA=Math.random()*Math.PI*2;pw=5;}}
   if(!tA)tA=Math.random()*Math.PI*2;pw=Math.max(2,Math.min(10,pw||5));
   botAiming=true;const sA=tA+(Math.random()<.5?1:-1)*(.62+Math.random()*.42);angle=sA;render();
-  const t0=Date.now(),sd=cfg.sweep;
-  function sweep(){if(gameOver){botAiming=false;return;}const t=Math.min(1,(Date.now()-t0)/sd);const ease=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;let diff=tA-sA;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;angle=sA+diff*ease;render();if(t<1){requestAnimationFrame(sweep);}else{angle=tA;render();setTimeout(()=>{if(gameOver)return;let w=0;const wi=setInterval(()=>{w++;angle=tA+Math.sin(w*1.9)*.028*(1-w/5);render();if(w>=5){clearInterval(wi);angle=tA;botAiming=false;shootBall(pw,true);}},46);},cfg.hold);}}
+  const t0=Date.now(),sd=sweepDur;
+  function sweep(){if(gameOver){botAiming=false;return;}const t=Math.min(1,(Date.now()-t0)/sd);const ease=t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;let diff=tA-sA;while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;angle=sA+diff*ease;render();if(t<1){requestAnimationFrame(sweep);}else{angle=tA;render();setTimeout(()=>{if(gameOver)return;let w=0;const wi=setInterval(()=>{w++;angle=tA+Math.sin(w*1.9)*.028*(1-w/5);render();if(w>=5){clearInterval(wi);angle=tA;botAiming=false;shootBall(pw,true);}},46);},holdDur);}}
   requestAnimationFrame(sweep);
 }
 function findBestShot(pool){let best=null,bs=-Infinity;for(const tgt of pool)for(const pkt of pockets){const b2p=Math.atan2(pkt.y-tgt.y,pkt.x-tgt.x);const gx=tgt.x-Math.cos(b2p)*(tgt.r+cue.r),gy=tgt.y-Math.sin(b2p)*(tgt.r+cue.r);const c2b=Math.atan2(gy-cue.y,gx-cue.x),ad=Math.abs(normAngle(c2b-b2p));const d1=Math.hypot(gx-cue.x,gy-cue.y),d2=Math.hypot(tgt.x-pkt.x,tgt.y-pkt.y);if(isBlocked(cue,{x:gx,y:gy})||isBlocked(tgt,pkt))continue;const sc=100-ad*15-d1*.032-d2*.019;if(sc>bs){bs=sc;best={angle:c2b,pw:Math.min(10,Math.max(4,d1/27))};}}return best;}
@@ -1464,6 +1498,10 @@ GC.addEventListener('mousemove',e=>{
   if(shooting||botTurn||gameOver||cue.pocketed)return;
   angle=Math.atan2(my-cue.y,mx-cue.x);render();
 });
+GC.addEventListener('mousedown',()=>{
+  /* Blur any focused input so Enter key fires for shots */
+  if(document.activeElement&&document.activeElement!==document.body)document.activeElement.blur();
+});
 GC.addEventListener('click',e=>{
   const rect=GC.getBoundingClientRect(),sx=W/rect.width;const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sx;
   if(placingCue&&!botTurn){placingCue=false;ballInHandKitchen=false;document.getElementById('shbtn').disabled=false;flashMsg('');startClock(30);updateUI();render();return;}
@@ -1471,8 +1509,29 @@ GC.addEventListener('click',e=>{
 });
 document.getElementById('shbtn').addEventListener('click',()=>{if(placingCue&&!botTurn){placingCue=false;ballInHandKitchen=false;document.getElementById('shbtn').disabled=false;flashMsg('');startClock(30);updateUI();render();return;}if(shooting||botTurn||gameOver||cue.pocketed)return;shootBall(currentPower,false);});
 document.getElementById('pslider').addEventListener('input',e=>{setPower(parseInt(e.target.value));if(!shooting&&!botTurn&&!gameOver)render();});
-document.addEventListener('keydown',e=>{if(e.code!=='Enter'||e.repeat)return;if(placingCue&&!botTurn){placingCue=false;ballInHandKitchen=false;document.getElementById('shbtn').disabled=false;flashMsg('');startClock(30);updateUI();render();return;}if(shooting||botTurn||gameOver||cue.pocketed)return;enterHeld=true;enterChargeStart=Date.now();setPower(1);enterRampId=setInterval(()=>{if(!enterHeld){clearInterval(enterRampId);return;}setPower(1+(Math.min(2500,Date.now()-enterChargeStart)/2500)*9);render();},40);});
-document.addEventListener('keyup',e=>{if(e.code!=='Enter')return;if(!enterHeld)return;clearInterval(enterRampId);enterHeld=false;if(shooting||botTurn||gameOver||cue.pocketed)return;shootBall(currentPower,false);});
+
+/* Prevent chat Enter from triggering shot */
+document.getElementById('chat-input').addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.stopPropagation();sendChat();}
+});
+
+document.addEventListener('keydown',e=>{
+  if(e.code!=='Enter'||e.repeat)return;
+  /* Don't fire if any input/textarea is focused */
+  const tag=document.activeElement&&document.activeElement.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA')return;
+  if(placingCue&&!botTurn){placingCue=false;ballInHandKitchen=false;document.getElementById('shbtn').disabled=false;flashMsg('');startClock(30);updateUI();render();return;}
+  if(shooting||botTurn||gameOver||cue.pocketed)return;
+  enterHeld=true;enterChargeStart=Date.now();setPower(1);
+  enterRampId=setInterval(()=>{if(!enterHeld){clearInterval(enterRampId);return;}setPower(1+(Math.min(2500,Date.now()-enterChargeStart)/2500)*9);render();},40);
+});
+
+document.addEventListener('keyup',e=>{
+  if(e.code!=='Enter')return;if(!enterHeld)return;
+  clearInterval(enterRampId);enterHeld=false;
+  if(shooting||botTurn||gameOver||cue.pocketed)return;
+  shootBall(currentPower,false);
+});
 document.getElementById('newbtn').addEventListener('click',()=>{clearInterval(enterRampId);enterHeld=false;cancelAnimationFrame(gameAnimFrame);physicsRunning=false;initGame();});
 
 function playAgain(){
