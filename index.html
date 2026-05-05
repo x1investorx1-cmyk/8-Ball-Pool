@@ -390,7 +390,7 @@ header{width:100%;max-width:980px;display:flex;align-items:center;justify-conten
   <div class="login-card">
     <h2>Break &amp; Run</h2>
     <div class="login-sub">Sign in to save progress &amp; compete</div>
-    <div class="gift-badge">🎁 New players get 500 coins FREE + $10 gift credit</div>
+    <div class="gift-badge">🎁 New players get 500 coins FREE to start playing right away!</div>
     <div class="login-btns">
       <button class="login-btn" onclick="loginWith('google')"><span class="lb-icon">🔵</span>Continue with Google</button>
       <button class="login-btn" onclick="loginWith('apple')"><span class="lb-icon">🍎</span>Continue with Apple</button>
@@ -404,7 +404,7 @@ header{width:100%;max-width:980px;display:flex;align-items:center;justify-conten
     </div>
     <button class="btn-gold" onclick="loginAsGuest()">Play as Guest</button>
     <div style="font-size:9px;color:rgba(245,240,232,.2);margin-top:10px;text-align:center">
-      * Social logins simulate account creation. Progress saved locally.
+      🎮 All coins are virtual game currency · No real money involved
     </div>
   </div>
 </div>
@@ -568,8 +568,8 @@ header{width:100%;max-width:980px;display:flex;align-items:center;justify-conten
   <button class="close-btn" onclick="hideScreen('shop-screen')">✕</button>
   <div class="shop-inner">
     <div class="shop-title">🪙 Coin Shop</div>
-    <div class="shop-sub">All purchases are virtual coins for in-game use only</div>
-    <div class="gift-info">🎁 You have <strong id="gift-credit">$0</strong> gift credit available</div>
+    <div class="shop-sub">Free virtual coins — just for fun, no real money involved!</div>
+    <div class="gift-info">🎁 Bonus coins available: <strong id="gift-credit">0</strong> — click any pack to claim!</div>
     <div class="coin-packages" id="coin-packages"></div>
     <div class="sep"></div>
     <div class="ref-section">
@@ -580,6 +580,9 @@ header{width:100%;max-width:980px;display:flex;align-items:center;justify-conten
         <button class="btn-outline" onclick="copyRefCode()">📋 Copy Code</button>
         <button class="btn-outline" style="border-color:var(--green);color:var(--green)" onclick="shareRef()">📤 Share</button>
       </div>
+    </div>
+    <div style="margin-top:12px;padding:10px 14px;background:rgba(46,204,113,.06);border:1px solid rgba(46,204,113,.15);border-radius:8px;font-size:10px;color:rgba(46,204,113,.8);text-align:center;line-height:1.5">
+      🎮 <strong>PLAY COINS ONLY</strong> — All coins in Break &amp; Run are virtual game currency.<br>They have no real-world value and cannot be exchanged for real money.
     </div>
     <div style="margin-top:16px;text-align:center"><button class="btn-outline" onclick="hideScreen('shop-screen')">Close</button></div>
   </div>
@@ -707,9 +710,9 @@ function setupPlayer(name,type){
   if(!STATE.badgeNum||isNew)STATE.badgeNum=Math.floor(1000+Math.random()*8999);
   if(STATE.firstEntry||isNew){
     STATE.coins=(STATE.coins||0)+500;
-    STATE.giftCredit=10;
+    STATE.giftCredit=200; /* 200 bonus coins gift */
     STATE.firstEntry=false;
-    showToast('🎁 Welcome! +500 coins + $10 gift credit!',3000);
+    showToast('🎁 Welcome! +500 coins to get started!',3000);
   }
   document.getElementById('ref-code').textContent='BREAK-'+STATE.badgeNum;
   STATE.referralCode='BREAK-'+STATE.badgeNum;
@@ -1012,25 +1015,24 @@ function buildLeaderboard(){
    SHOP
    ===================================================== */
 const COIN_PACKAGES=[
-  {coins:500,price:'$4.99',bonus:'',icon:'🪙',popular:false},
-  {coins:1200,price:'$9.99',bonus:'+200 bonus',icon:'💰',popular:true},
-  {coins:2800,price:'$19.99',bonus:'+800 bonus',icon:'💎',popular:false},
-  {coins:6000,price:'$39.99',bonus:'+2000 bonus',icon:'👑',popular:false}
+  {coins:500,  price:'500 Play Points',  bonus:'',              icon:'🪙', popular:false},
+  {coins:1200, price:'1,000 Play Points',bonus:'+200 free',     icon:'💰', popular:true},
+  {coins:2800, price:'2,500 Play Points',bonus:'+300 free',     icon:'💎', popular:false},
+  {coins:6500, price:'5,000 Play Points',bonus:'+1,500 free',   icon:'👑', popular:false}
 ];
 function buildShop(){
-  document.getElementById('gift-credit').textContent='$'+((STATE.giftCredit||0).toFixed(2));
+  document.getElementById('gift-credit').textContent=(STATE.giftCredit||0)+' bonus coins';
   document.getElementById('ref-code').textContent='BREAK-'+String(STATE.badgeNum||1234).padStart(4,'0');
   const cp=document.getElementById('coin-packages');cp.innerHTML='';
   COIN_PACKAGES.forEach(pkg=>{
     const div=document.createElement('div');div.className='coin-pkg'+(pkg.popular?' popular':'');
     div.innerHTML=`<div class="pkg-icon">${pkg.icon}</div>
       <div class="pkg-coins">🪙${pkg.coins.toLocaleString()}</div>
-      <div class="pkg-price">${pkg.price}</div>
+      <div class="pkg-price" style="font-size:10px;color:var(--muted)">${pkg.price}</div>
       ${pkg.bonus?`<div class="pkg-bonus">${pkg.bonus}</div>`:''}`;
     div.addEventListener('click',()=>{
-      if(confirm(`Purchase 🪙${pkg.coins} coins for ${pkg.price}?\n(This is simulated — no real charge)`)){
-        earnCoins(pkg.coins);snd('coin',.3);showToast('🪙'+pkg.coins+' coins added!');buildShop();
-      }
+      earnCoins(pkg.coins);snd('coin',.3);
+      showToast('🎉 +🪙'+pkg.coins.toLocaleString()+' coins added!');buildShop();
     });
     cp.appendChild(div);
   });
@@ -1408,7 +1410,7 @@ function endGame(won,wt,ws){
   STATE.gamesPlayed++;addToLeaderboard();saveState();updateTopBar();
   document.getElementById('wtitle').textContent=wt;
   document.getElementById('wsub').textContent=ws;
-  document.getElementById('wprize').textContent=won?`🎉 +🪙${prize} coins!`:`Better luck next time!`;
+  document.getElementById('wprize').textContent=won?`🎉 +🪙${prize} coins earned!`:`Keep practicing — you'll get there! 💪`;
   document.getElementById('goverlay').classList.add('show');updateUI();
 }
 
